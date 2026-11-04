@@ -1,26 +1,20 @@
-import express from "express";
-import cors from "cors";
 import dotenv from "dotenv";
-
 dotenv.config();
 
-const app = express();
+import app from "./app.js";
+import connectDB from "./config/db.js";
+import authRoutes from "./routes/authRoutes.js";
 
-// Middlewares
-app.use(cors());
-app.use(express.json());
+app.use("/api/auth", authRoutes);
 
-// Test API
-app.get("/", (req, res) => {
-    res.status(200).json({
-        success: true,
-        message: "Pickmeup Backend is running!"
-    });
-});
-
-// Server
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+const startServer = async () => {
+    await connectDB();
+
+    app.listen(PORT, () => {
+        console.log(`nexopod server running on port ${PORT}`);
+    });
+};
+
+startServer();
