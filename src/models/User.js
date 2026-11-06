@@ -22,9 +22,25 @@ const userSchema = new mongoose.Schema(
             required: true,
             select: false,
         },
+
+        isStoreCreator: {
+    type: Boolean,
+    default: false,
+},
     },
     {
         timestamps: true,
+    }
+);
+
+// Only one user can have Store Creator permission.
+userSchema.index(
+    { isStoreCreator: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            isStoreCreator: true,
+        },
     }
 );
 

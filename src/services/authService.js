@@ -2,50 +2,91 @@ import bcrypt from "bcrypt";
 import User from "../models/User.js";
 import jwt from "jsonwebtoken";
 
+
 export const registerUser = async ({ name, phone, password }) => {
     try {
-        // Check whether phone number already exists
-        const existingUser = await User.findOne({ phone });
+        // Ensure MongoDB indexes are created before registration.
+        await User.init();
 
-        if (existingUser) {
-            const error = new Error("Phone number is already registered");
-            error.statusCode = 409;
+        // Check how many accounts already exist.
+        const existingUsersCount = await User.countDocuments();
+
+        // Fail safely if multiple legacy accounts already exist.
+        if (existingUsersCount > 1) {
+            const error = new Error(
+                "Multiple accounts already exist. Please contact the administrator."
+            );
+            error.statusCode = 500;
             throw error;
         }
 
-        // Hash the password
+        // If one account exists, it is the holder.
+        if (existingUsersCount === 1) {
+            const existingUser = await User.findOne();
+
+            // Promote the existing account to Store Creator.
+            if (!existingUser.isStoreCreator) {
+                await User.updateOne(
+                    { _id: existingUser._id },
+                    { $set: { isStoreCreator: true } }
+                );
+            }
+
+            const error = new Error(
+                "Holder already exists. New registrations are closed."
+            );
+            error.statusCode = 403;
+            throw error;
+        }
+
+        // Hash password before saving.
         const hashedPassword = await bcrypt.hash(password, 12);
 
-        // Create new user
+        // Create the only permitted account.
         const user = await User.create({
             name,
             phone,
             password: hashedPassword,
+            isStoreCreator: true,
         });
 
-        // Return safe user information
+        console.log("NexoPod holder account registered:", user._id);
+
         return {
             id: user._id,
             name: user.name,
             phone: user.phone,
+            isStoreCreator: user.isStoreCreator,
             createdAt: user.createdAt,
         };
 
     } catch (error) {
-
-        // Handle duplicate key error (concurrent registrations)
+        // Handle duplicate-key errors.
         if (error.code === 11000) {
-            const duplicateError = new Error(
-                "Phone number is already registered"
-            );
+            if (
+                error.keyPattern?.isStoreCreator === 1 ||
+                error.keyValue?.isStoreCreator === true
+            ) {
+                const holderError = new Error(
+                    "Holder already exists. New registrations are closed."
+                );
+                holderError.statusCode = 403;
+                throw holderError;
+            }
 
-            duplicateError.statusCode = 409;
-            throw duplicateError;
+            if (error.keyPattern?.phone === 1) {
+                const duplicateError = new Error(
+                    "Phone number is already registered."
+                );
+                duplicateError.statusCode = 409;
+                throw duplicateError;
+            }
         }
 
         throw error;
     }
 };
+
 
 export const loginUser = async ({ phone, password }) => {
     // Find user and explicitly include the password field
@@ -83,4 +124,18 @@ export const loginUser = async ({ phone, password }) => {
             phone: user.phone,
         },
     };
+};
+
+
+export const getRegistrationStatus = async () => {
+    try {
+        const existingUsersCount = await User.countDocuments();
+
+        return {
+            registrationOpen: existingUsersCount === 0,
+        };
+    } catch (error) {
+        console.error("Registration status check failed:", error.message);
+        throw error;
+    }
 };

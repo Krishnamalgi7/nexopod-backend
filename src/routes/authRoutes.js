@@ -5,8 +5,14 @@ import {
     registerSchema,
     loginSchema,
 } from "../validators/authValidator.js";
+import {
+    checkRegistrationStatus,
+} from "../controllers/registrationStatusController.js";
 
 const router = express.Router();
+
+// GET /api/auth/registration-status
+router.get("/registration-status", checkRegistrationStatus);
 
 // POST /api/auth/register
 router.post("/register", validateRequest(registerSchema), register);
