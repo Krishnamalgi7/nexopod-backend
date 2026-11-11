@@ -43,3 +43,6 @@ Desktop.ini
 
 # Debug files
 *.tgz
+
+#Images and uploads
+uploads/
