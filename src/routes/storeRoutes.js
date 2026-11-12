@@ -1,69 +1,53 @@
-import express from "express";
 
-import {
+const express = require("express");
+
+const {
     createStore,
     getStores,
     getStoreStats,
     updateStoreStatus,
     updateStoreDetails,
-} from "../controllers/storeController.js";
+} = require("../controllers/storeController");
 
-import uploadStoreImages from "../middleware/uploadStoreImages.js";
-
-import validateRequest from "../middleware/validateRequest.js";
-
-import {
-    createStoreSchema,
-    updateStoreStatusSchema,
-} from "../validators/storeValidator.js";
-
-import authenticateUser from "../middleware/authMiddleware.js";
-import requireStoreCreator from "../middleware/requireStoreCreator.js";
+const superAdminVerify = require("../middleware/authMiddleware");
+const uploadStoreImages = require("../middleware/uploadStoreImages");
 
 const router = express.Router();
 
-// GET /api/stores/stats - Fetch store summary counts for dashboard
+// Dashboard statistics
 router.get(
-    "/stats",
-    authenticateUser,
-    requireStoreCreator,
+    "/get-store-stats",
+    superAdminVerify,
     getStoreStats
 );
 
-// POST /api/stores
-router.post(
-    "/",
-    authenticateUser,
-    requireStoreCreator,
-    uploadStoreImages,
-    validateRequest(createStoreSchema),
-    createStore
-);
-
-// GET /api/stores - Fetch paginated/filtered stores
+// Get all stores with search, filters and pagination
 router.get(
-    "/",
-    authenticateUser,
-    requireStoreCreator,
+    "/get-all-stores",
+    superAdminVerify,
     getStores
 );
 
-// PATCH /api/stores/:storeId/status - Update store Active/Inactive status
+// Create a new store
+router.post(
+    "/create-store",
+    superAdminVerify,
+    uploadStoreImages,
+    createStore
+);
+
+// Update store active/inactive status
 router.patch(
-    "/:storeId/status",
-    authenticateUser,
-    requireStoreCreator,
-    validateRequest(updateStoreStatusSchema),
+    "/update-store-status/:storeId",
+    superAdminVerify,
     updateStoreStatus
 );
 
-// PATCH /api/stores/:storeId/details - Update store text details
-router.patch(
-    "/:storeId/details",
-    authenticateUser,
-    requireStoreCreator,
-    validateRequest(createStoreSchema), // Reusing create schema since text fields are identical
+// Update store details
+router.put(
+    "/update-store/:storeId",
+    superAdminVerify,
     updateStoreDetails
 );
 
-export default router;
+module.exports = router;

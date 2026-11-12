@@ -1,8 +1,8 @@
 
-import jwt from "jsonwebtoken";
-import User from "../models/User.js";
+const jwt = require("jsonwebtoken");
+const SuperAdmin = require("../models/SuperAdmin");
 
-const authenticateUser = async (req, res, next) => {
+const superAdminVerify = async (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
 
@@ -15,22 +15,20 @@ const authenticateUser = async (req, res, next) => {
 
         const token = authHeader.split(" ")[1];
 
-        const decoded = jwt.verify(
-            token,
-            process.env.JWT_SECRET
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+        const superAdmin = await SuperAdmin.findById(decoded.userId).select(
+            "_id name phone isStoreCreator"
         );
 
-        const user = await User.findById(decoded.userId)
-            .select("_id name phone isStoreCreator");
-
-        if (!user) {
+        if (!superAdmin) {
             return res.status(401).json({
                 success: false,
-                message: "User account not found.",
+                message: "Super Admin account not found.",
             });
         }
 
-        req.user = user;
+        req.superAdmin = superAdmin;
 
         next();
     } catch (error) {
@@ -43,4 +41,4 @@ const authenticateUser = async (req, res, next) => {
     }
 };
 
-export default authenticateUser;
+module.exports = superAdminVerify;

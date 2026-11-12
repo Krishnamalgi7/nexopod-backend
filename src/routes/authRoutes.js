@@ -1,23 +1,16 @@
-import express from "express";
-import { register, login } from "../controllers/authController.js";
-import validateRequest from "../middleware/validateRequest.js";
-import {
-    registerSchema,
-    loginSchema,
-} from "../validators/authValidator.js";
-import {
-    checkRegistrationStatus,
-} from "../controllers/registrationStatusController.js";
+
+const express = require("express");
+
+const {
+    registerSuperAdmin,
+    loginSuperAdmin,
+    getRegistrationStatus
+} = require("../controllers/authController");
 
 const router = express.Router();
 
-// GET /api/auth/registration-status
-router.get("/registration-status", checkRegistrationStatus);
+router.get("/registration-status", getRegistrationStatus);
+router.post("/register", registerSuperAdmin);
+router.post("/login", loginSuperAdmin);
 
-// POST /api/auth/register
-router.post("/register", validateRequest(registerSchema), register);
-
-// POST /api/auth/login
-router.post("/login", validateRequest(loginSchema), login);
-
-export default router;
+module.exports = router;

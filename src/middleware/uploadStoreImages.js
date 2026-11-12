@@ -1,5 +1,5 @@
 
-import storeUpload from "../config/storeUpload.js";
+const storeUpload = require("../config/storeUpload");
 
 const uploadFields = storeUpload.fields([
     { name: "image", maxCount: 1 },
@@ -92,4 +92,4 @@ const uploadStoreImages = (req, res, next) => {
     });
 };
 
-export default uploadStoreImages;
+module.exports = uploadStoreImages;

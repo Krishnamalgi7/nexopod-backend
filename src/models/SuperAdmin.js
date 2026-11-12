@@ -1,6 +1,7 @@
-import mongoose from "mongoose";
 
-const userSchema = new mongoose.Schema(
+const mongoose = require("mongoose");
+
+const superAdminSchema = new mongoose.Schema(
     {
         name: {
             type: String,
@@ -24,17 +25,18 @@ const userSchema = new mongoose.Schema(
         },
 
         isStoreCreator: {
-    type: Boolean,
-    default: false,
-},
+            type: Boolean,
+            default: false,
+        },
     },
     {
         timestamps: true,
+        collection: "Super_Admin",
     }
 );
 
-// Only one user can have Store Creator permission.
-userSchema.index(
+// Only one account can have Store Creator permission.
+superAdminSchema.index(
     { isStoreCreator: 1 },
     {
         unique: true,
@@ -44,6 +46,6 @@ userSchema.index(
     }
 );
 
-const User = mongoose.model("User", userSchema);
+const SuperAdmin = mongoose.model("SuperAdmin", superAdminSchema);
 
-export default User;
+module.exports = SuperAdmin;

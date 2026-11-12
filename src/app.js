@@ -1,8 +1,10 @@
-import express from "express";
-import cors from "cors";
-import path from "node:path";
-import authRoutes from "./routes/authRoutes.js";
-import storeRoutes from "./routes/storeRoutes.js";
+
+const express = require("express");
+const cors = require("cors");
+const path = require("path");
+
+const authRoutes = require("./routes/authRoutes");
+const storeRoutes = require("./routes/storeRoutes");
 
 const app = express();
 
@@ -36,4 +38,4 @@ app.get("/", (req, res) => {
     });
 });
 
-export default app;
+module.exports = app;

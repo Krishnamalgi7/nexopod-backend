@@ -1,84 +1,82 @@
-import mongoose from "mongoose";
+
+const mongoose = require("mongoose");
 
 const storeImageSchema = new mongoose.Schema(
-  {
-    type: {
-      type: String,
-      enum: ["upload"],
-      required: true,
+    {
+        type: {
+            type: String,
+            enum: ["upload"],
+            required: true,
+        },
+        path: {
+            type: String,
+            required: true,
+            trim: true,
+        },
     },
-    path: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-  },
-  { _id: false },
+    { _id: false }
 );
 
 const storeSchema = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-      required: true,
-      trim: true,
-      minlength: 2,
-      maxlength: 100,
-    },
+    {
+        name: {
+            type: String,
+            required: true,
+            trim: true,
+            minlength: 2,
+            maxlength: 100,
+        },
 
-    addressLink: {
-      type: String,
-      required: true,
-      trim: true,
-    },
+        addressLink: {
+            type: String,
+            required: true,
+            trim: true,
+        },
 
-    contactNumber: {
-      type: String,
-      required: true,
-      match: /^[0-9]{10}$/,
-    },
+        contactNumber: {
+            type: String,
+            required: true,
+            match: /^[0-9]{10}$/,
+        },
 
-    // Store operating timings (e.g., "10:00 AM - 09:00 PM")
-    timings: {
-      type: String,
-      required: true,
-      trim: true,
-      minlength: 2,
-      maxlength: 100,
-    },
+        timings: {
+            type: String,
+            required: true,
+            trim: true,
+            minlength: 2,
+            maxlength: 100,
+        },
 
-    // Main store image
-    image: {
-      type: storeImageSchema,
-      required: true,
-    },
+        image: {
+            type: storeImageSchema,
+            required: true,
+        },
 
-    // Maximum 4 additional images
-    images: {
-      type: [storeImageSchema],
-      default: [],
-      validate: {
-        validator: (images) => images.length <= 4,
-        message: "A maximum of 4 additional images is allowed.",
-      },
-    },
+        images: {
+            type: [storeImageSchema],
+            default: [],
+            validate: {
+                validator: (images) => images.length <= 4,
+                message: "A maximum of 4 additional images is allowed.",
+            },
+        },
 
-    // Store operational status (true = Active, false = Inactive)
-    isActive: {
-      type: Boolean,
-      default: true,
+        isActive: {
+            type: Boolean,
+            default: true,
+        },
     },
-  },
-  {
-    timestamps: true,
-  },
+    {
+        timestamps: true,
+        collection: "All_Stores",
+    }
 );
 
-// Indexes for fast filtering, sorting, and searching in MongoDB
+// Indexes for filtering, sorting and searching.
 storeSchema.index({ isActive: 1, createdAt: -1 });
 storeSchema.index({ name: 1 });
 storeSchema.index({ contactNumber: 1 });
 
 const Store = mongoose.model("Store", storeSchema);
 
-export default Store;
+module.exports = Store;
