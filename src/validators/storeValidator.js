@@ -32,8 +32,31 @@ export const createStoreSchema = z.object({
       }
     }, "Please provide a valid Google Maps link"),
 
-  contactNumber: z
+contactNumber: z
     .string()
     .trim()
     .regex(/^[0-9]{10}$/, "Contact number must contain exactly 10 digits"),
+
+timings: z
+    .string()
+    .trim()
+    .min(2, "Timings must contain at least 2 characters")
+    .max(100, "Timings cannot exceed 100 characters"),
+});
+
+export const getStoresQuerySchema = z.object({
+  search: z.string().trim().max(100).optional().default(""),
+  status: z
+    .enum(["all", "active", "inactive"])
+    .optional()
+    .default("all"),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  limit: z.coerce.number().int().min(1).max(50).optional().default(10),
+});
+
+export const updateStoreStatusSchema = z.object({
+  isActive: z.boolean({
+    required_error: "Store status (isActive) is required",
+    invalid_type_error: "Store status (isActive) must be a boolean",
+  }),
 });

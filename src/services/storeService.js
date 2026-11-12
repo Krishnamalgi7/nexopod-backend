@@ -3,6 +3,7 @@ import sharp from "sharp";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import mongoose from "mongoose";
 
 const uploadRoot = path.resolve("uploads/stores");
 
@@ -44,7 +45,7 @@ const compressAndSaveImage = async (file, destination) => {
 };
 
 export const createStore = async (storeData, files = {}) => {
-  const { name, addressLink, contactNumber } = storeData;
+  const { name, addressLink, contactNumber, timings } = storeData;
 
   const mainImageFile = files.image?.[0] || null;
   const additionalImageFiles = files.images || [];
@@ -104,6 +105,7 @@ export const createStore = async (storeData, files = {}) => {
       name,
       addressLink,
       contactNumber,
+      timings,
       image: mainImage,
       images: uploadedImages
     });
@@ -133,15 +135,143 @@ export const createStore = async (storeData, files = {}) => {
 };
 
 
-export const getStores = async () => {
-    try {
-        const stores = await Store.find()
-            .sort({ createdAt: -1 })
-            .lean();
+// Escape special regex characters to prevent regex injection from search input.
+const escapeRegex = (value) => {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+};
 
-        return stores;
-    } catch (error) {
-        console.error("Fetch stores service error:", error.message);
-        throw error;
+export const getStores = async ({
+  search = "",
+  status = "all",
+  page = 1,
+  limit = 10,
+} = {}) => {
+  try {
+    const query = {};
+    const andConditions = [];
+
+    // 1. Status filter (treats legacy documents without isActive as active)
+    if (status === "active") {
+      andConditions.push({
+        $or: [{ isActive: true }, { isActive: { $exists: false } }],
+      });
+    } else if (status === "inactive") {
+      andConditions.push({ isActive: false });
     }
+
+    // 2. Search filter (matches store name or contact number)
+    if (search) {
+      const safeSearchRegex = new RegExp(escapeRegex(search), "i");
+      andConditions.push({
+        $or: [
+          { name: safeSearchRegex },
+          { contactNumber: safeSearchRegex },
+        ],
+      });
+    }
+
+    if (andConditions.length === 1) {
+      Object.assign(query, andConditions[0]);
+    } else if (andConditions.length > 1) {
+      query.$and = andConditions;
+    }
+
+    const skip = (page - 1) * limit;
+
+    // Run count and paginated fetch in parallel for better performance
+    const [totalStores, rawStores] = await Promise.all([
+      Store.countDocuments(query),
+      Store.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+    ]);
+
+    // Ensure every returned store explicitly has boolean isActive
+    const stores = rawStores.map((store) => ({
+      ...store,
+      isActive: store.isActive !== false,
+    }));
+
+    const totalPages = Math.max(1, Math.ceil(totalStores / limit));
+
+    return {
+      stores,
+      pagination: {
+        totalStores,
+        totalPages,
+        currentPage: page,
+        limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    };
+  } catch (error) {
+    console.error("Fetch stores service error:", error.message);
+    throw error;
+  }
+};
+
+export const getStoreStats = async () => {
+  try {
+    const [totalStores, inactiveStores] = await Promise.all([
+      Store.countDocuments(),
+      Store.countDocuments({ isActive: false }),
+    ]);
+
+    const activeStores = totalStores - inactiveStores;
+
+    return {
+      totalStores,
+      activeStores,
+      inactiveStores,
+    };
+  } catch (error) {
+    console.error("Fetch store stats service error:", error.message);
+    throw error;
+  }
+};
+
+export const updateStoreStatus = async (storeId, isActive) => {
+  if (!mongoose.Types.ObjectId.isValid(storeId)) {
+    throw new StoreServiceError("Invalid store ID.", 400);
+  }
+
+  const updatedStore = await Store.findByIdAndUpdate(
+    storeId,
+    { $set: { isActive } },
+    { new: true, runValidators: true }
+  ).lean();
+
+  if (!updatedStore) {
+    throw new StoreServiceError("Store not found.", 404);
+  }
+
+  return updatedStore;
+};
+
+export const updateStoreDetails = async (storeId, updateData) => {
+  if (!mongoose.Types.ObjectId.isValid(storeId)) {
+    throw new StoreServiceError("Invalid store ID.", 400);
+  }
+
+  const updatedStore = await Store.findByIdAndUpdate(
+    storeId,
+    { 
+      $set: { 
+        name: updateData.name, 
+        addressLink: updateData.addressLink, 
+        contactNumber: updateData.contactNumber,
+        timings: updateData.timings 
+      } 
+    },
+    { new: true, runValidators: true }
+  ).lean();
+
+  if (!updatedStore) {
+    throw new StoreServiceError("Store not found.", 404);
+  }
+
+  return updatedStore;
 };
