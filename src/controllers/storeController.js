@@ -222,6 +222,16 @@ const getStores = async (req, res) => {
       typeof req.query.search === "string" ? req.query.search.trim() : "";
 
     const status = req.query.status || "all";
+    const service = req.query.service || "all";
+
+    const requestedServices = req.query.services;
+
+const services =
+  requestedServices === undefined
+    ? []
+    : Array.isArray(requestedServices)
+      ? requestedServices
+      : [requestedServices];
 
     const page = Number(req.query.page || 1);
     const limit = Number(req.query.limit || 10);
@@ -239,6 +249,35 @@ const getStores = async (req, res) => {
         message: "Invalid store status filter.",
       });
     }
+
+    const allowedServiceFilters = [
+  "all",
+  "Phone Charging",
+  "Pick Me Later",
+  "both",
+];
+
+if (!allowedServiceFilters.includes(service)) {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid store service filter.",
+  });
+}
+
+    if (
+  services.length > 2 ||
+  services.some(
+    (service) =>
+      typeof service !== "string" ||
+      !["Phone Charging", "Pick Me Later"].includes(service),
+  ) ||
+  new Set(services).size !== services.length
+) {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid store services filter.",
+  });
+}
 
     if (!Number.isInteger(page) || page < 1) {
       return res.status(400).json({
@@ -265,6 +304,30 @@ const getStores = async (req, res) => {
     } else if (status === "inactive") {
       andConditions.push({ isActive: false });
     }
+
+    // Filter stores by selected service.
+if (service === "Phone Charging") {
+  andConditions.push({
+    services: "Phone Charging",
+  });
+} else if (service === "Pick Me Later") {
+  andConditions.push({
+    services: "Pick Me Later",
+  });
+} else if (service === "both") {
+  andConditions.push({
+    services: {
+      $all: ["Phone Charging", "Pick Me Later"],
+    },
+  });
+}
+
+    // Filter stores by selected services.
+if (services.length > 0) {
+  andConditions.push({
+    services: { $in: services },
+  });
+}
 
     // Search by store name or contact number.
     if (search) {
