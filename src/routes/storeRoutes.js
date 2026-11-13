@@ -47,6 +47,7 @@ router.patch(
 router.put(
     "/update-store/:storeId",
     superAdminVerify,
+    uploadStoreImages,
     updateStoreDetails
 );
 
