@@ -22,6 +22,7 @@ const DAYS = [
 
 const ALLOWED_SERVICES = ["Phone Charging", "Pick Me Later"];
 
+
 const validateStoreDetails = (data) => {
   const { name, addressLink, contactNumber, services, weeklyTimings } = data;
 
@@ -79,6 +80,16 @@ const validateStoreDetails = (data) => {
 
   const timePattern = /^(0[1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
 
+  const toMinutes = (time) => {
+    const [clock, period] = time.split(" ");
+    const [hours, minutes] = clock.split(":").map(Number);
+
+    const normalizedHours =
+      (hours % 12) + (period === "PM" ? 12 : 0);
+
+    return normalizedHours * 60 + minutes;
+  };
+
   for (const day of DAYS) {
     const timing = parsedWeeklyTimings[day];
 
@@ -98,9 +109,30 @@ const validateStoreDetails = (data) => {
     ) {
       return `Invalid opening or closing time for ${day}. Use 12-hour format.`;
     }
+
+    if (toMinutes(timing.closeTime) <= toMinutes(timing.openTime)) {
+      return `Closing time must be later than opening time for ${day}.`;
+    }
   }
 
   return null;
+};
+
+
+const isContactNumberAlreadyAssigned = async (
+  contactNumber,
+  excludedStoreId = null,
+) => {
+  const query = {
+    contactNumber: contactNumber.trim(),
+  };
+
+  // Exclude the current store when updating its details.
+  if (excludedStoreId) {
+    query._id = { $ne: excludedStoreId };
+  }
+
+  return await Store.exists(query);
 };
 
 // CREATE STORE
@@ -119,6 +151,20 @@ const createStore = async (req, res) => {
     }
 
     const { name, addressLink, contactNumber, timings } = req.body;
+
+    const phoneAlreadyAssigned =
+      await isContactNumberAlreadyAssigned(contactNumber);
+
+    if (phoneAlreadyAssigned) {
+      console.warn(
+        "[Store] Creation rejected: contact number already assigned.",
+      );
+
+      return res.status(409).json({
+        success: false,
+        message: "This contact number is already assigned to another store.",
+      });
+    }
 
     const services = JSON.parse(req.body.services);
     const weeklyTimings = JSON.parse(req.body.weeklyTimings);
@@ -206,6 +252,13 @@ const createStore = async (req, res) => {
         });
     }
 
+        if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "This contact number is already assigned to another store.",
+      });
+    }
+
     console.error("Create store error:", error.message);
 
     return res.status(500).json({
@@ -226,12 +279,12 @@ const getStores = async (req, res) => {
 
     const requestedServices = req.query.services;
 
-const services =
-  requestedServices === undefined
-    ? []
-    : Array.isArray(requestedServices)
-      ? requestedServices
-      : [requestedServices];
+    const services =
+      requestedServices === undefined
+        ? []
+        : Array.isArray(requestedServices)
+          ? requestedServices
+          : [requestedServices];
 
     const page = Number(req.query.page || 1);
     const limit = Number(req.query.limit || 10);
@@ -251,33 +304,33 @@ const services =
     }
 
     const allowedServiceFilters = [
-  "all",
-  "Phone Charging",
-  "Pick Me Later",
-  "both",
-];
+      "all",
+      "Phone Charging",
+      "Pick Me Later",
+      "both",
+    ];
 
-if (!allowedServiceFilters.includes(service)) {
-  return res.status(400).json({
-    success: false,
-    message: "Invalid store service filter.",
-  });
-}
+    if (!allowedServiceFilters.includes(service)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid store service filter.",
+      });
+    }
 
     if (
-  services.length > 2 ||
-  services.some(
-    (service) =>
-      typeof service !== "string" ||
-      !["Phone Charging", "Pick Me Later"].includes(service),
-  ) ||
-  new Set(services).size !== services.length
-) {
-  return res.status(400).json({
-    success: false,
-    message: "Invalid store services filter.",
-  });
-}
+      services.length > 2 ||
+      services.some(
+        (service) =>
+          typeof service !== "string" ||
+          !["Phone Charging", "Pick Me Later"].includes(service),
+      ) ||
+      new Set(services).size !== services.length
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid store services filter.",
+      });
+    }
 
     if (!Number.isInteger(page) || page < 1) {
       return res.status(400).json({
@@ -306,28 +359,28 @@ if (!allowedServiceFilters.includes(service)) {
     }
 
     // Filter stores by selected service.
-if (service === "Phone Charging") {
-  andConditions.push({
-    services: "Phone Charging",
-  });
-} else if (service === "Pick Me Later") {
-  andConditions.push({
-    services: "Pick Me Later",
-  });
-} else if (service === "both") {
-  andConditions.push({
-    services: {
-      $all: ["Phone Charging", "Pick Me Later"],
-    },
-  });
-}
+    if (service === "Phone Charging") {
+      andConditions.push({
+        services: "Phone Charging",
+      });
+    } else if (service === "Pick Me Later") {
+      andConditions.push({
+        services: "Pick Me Later",
+      });
+    } else if (service === "both") {
+      andConditions.push({
+        services: {
+          $all: ["Phone Charging", "Pick Me Later"],
+        },
+      });
+    }
 
     // Filter stores by selected services.
-if (services.length > 0) {
-  andConditions.push({
-    services: { $in: services },
-  });
-}
+    if (services.length > 0) {
+      andConditions.push({
+        services: { $in: services },
+      });
+    }
 
     // Search by store name or contact number.
     if (search) {
@@ -459,7 +512,7 @@ const updateStoreStatus = async (req, res) => {
     });
   }
 };
-   
+
 // UPDATE STORE DETAILS
 const updateStoreDetails = async (req, res) => {
   let newMainImagePath = null;
@@ -511,6 +564,20 @@ const updateStoreDetails = async (req, res) => {
       });
     }
 
+    const phoneAlreadyAssigned = await isContactNumberAlreadyAssigned(
+      contactNumber,
+      existingStore._id,
+    );
+
+    if (phoneAlreadyAssigned) {
+      console.warn("[Store] Update rejected: contact number already assigned.");
+
+      return res.status(409).json({
+        success: false,
+        message: "This contact number is already assigned to another store.",
+      });
+    }
+
     // 6. Parse existing additional images selected to be retained.
     let requestedExistingImages;
 
@@ -532,8 +599,7 @@ const updateStoreDetails = async (req, res) => {
       requestedExistingImages.some(
         (imagePath) => typeof imagePath !== "string",
       ) ||
-      new Set(requestedExistingImages).size !==
-        requestedExistingImages.length
+      new Set(requestedExistingImages).size !== requestedExistingImages.length
     ) {
       return res.status(400).json({
         success: false,
@@ -589,10 +655,7 @@ const updateStoreDetails = async (req, res) => {
     let oldMainImagePath = null;
 
     if (mainImageFile) {
-      oldMainImagePath = getStoreImageFilePath(
-        existingStore.image,
-        uploadRoot,
-      );
+      oldMainImagePath = getStoreImageFilePath(existingStore.image, uploadRoot);
 
       const targetFolder = oldMainImagePath
         ? path.dirname(oldMainImagePath)
@@ -687,10 +750,7 @@ const updateStoreDetails = async (req, res) => {
     // 22. Delete previous main image after successful database update.
     if (oldMainImagePath && oldMainImagePath !== newMainImagePath) {
       await fs.unlink(oldMainImagePath).catch((cleanupError) => {
-        console.error(
-          "Old main image cleanup error:",
-          cleanupError.message,
-        );
+        console.error("Old main image cleanup error:", cleanupError.message);
       });
     }
 
@@ -705,10 +765,7 @@ const updateStoreDetails = async (req, res) => {
     if (!saveCompleted) {
       if (newMainImagePath) {
         await fs.unlink(newMainImagePath).catch((cleanupError) => {
-          console.error(
-            "New main image cleanup error:",
-            cleanupError.message,
-          );
+          console.error("New main image cleanup error:", cleanupError.message);
         });
       }
 
@@ -720,6 +777,13 @@ const updateStoreDetails = async (req, res) => {
           );
         });
       }
+    }
+
+        if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "This contact number is already assigned to another store.",
+      });
     }
 
     console.error("Update store details error:", error.message);

@@ -133,7 +133,7 @@ const storeSchema = new mongoose.Schema(
 // Indexes for filtering, sorting and searching.
 storeSchema.index({ isActive: 1, createdAt: -1 });
 storeSchema.index({ name: 1 });
-storeSchema.index({ contactNumber: 1 });
+storeSchema.index({ contactNumber: 1 }, { unique: true });
 
 const Store = mongoose.model("Store", storeSchema);
 
