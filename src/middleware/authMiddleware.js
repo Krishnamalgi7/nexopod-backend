@@ -1,5 +1,5 @@
-
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const SuperAdmin = require("../models/SuperAdmin");
 
 const superAdminVerify = async (req, res, next) => {
@@ -17,9 +17,19 @@ const superAdminVerify = async (req, res, next) => {
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        const superAdmin = await SuperAdmin.findById(decoded.userId).select(
-            "_id name phone isStoreCreator"
-        );
+if (
+    typeof decoded.userId !== "string" ||
+    !mongoose.isValidObjectId(decoded.userId)
+) {
+    return res.status(401).json({
+        success: false,
+        message: "Invalid authentication token.",
+    });
+}
+
+const superAdmin = await SuperAdmin.findById(decoded.userId).select(
+    "_id name phone isStoreCreator"
+);
 
         if (!superAdmin) {
             return res.status(401).json({

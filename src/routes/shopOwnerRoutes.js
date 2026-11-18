@@ -12,13 +12,18 @@ const {
     updatePhoneChargingBookingStatus,
 } = require("../controllers/bookingController");
 
+const {
+    sendOtpLimiter,
+    verifyOtpLimiter,
+} = require("../middleware/otpRateLimit");
+
 const shopOwnerVerify = require("../middleware/shopOwnerVerify");
 const router = express.Router();
 
 
-router.post("/send-otp", sendShopOwnerOtp);
+router.post("/send-otp", sendOtpLimiter, sendShopOwnerOtp);
 
-router.post("/login", loginShopOwner);
+router.post("/login", verifyOtpLimiter, loginShopOwner);
 
 // Get authenticated Shop Owner's store details
 router.get("/me", shopOwnerVerify, getShopOwnerDetails);

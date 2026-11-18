@@ -41,9 +41,10 @@ const sendCustomerOtp = async (req, res) => {
         }
 
         customerOtps.set(customerPhone, {
-            otp: developmentOtp,
-            expiresAt: Date.now() + OTP_VALIDITY_MS,
-        });
+    otp: developmentOtp,
+    expiresAt: Date.now() + OTP_VALIDITY_MS,
+    attempts: 0,
+});
 
         console.log("[Customer] Development OTP session created.");
 
@@ -52,7 +53,7 @@ const sendCustomerOtp = async (req, res) => {
             message: "OTP generated successfully. It is valid for 2 minutes.",
             data: {
                 expiresIn: 120,
-                developmentOtp,
+                
             },
         });
     } catch (error) {
@@ -114,11 +115,22 @@ const loginCustomer = async (req, res) => {
 
         // 9. Verify the submitted OTP.
         if (otp !== otpSession.otp) {
-            return res.status(401).json({
-                success: false,
-                message: "Invalid OTP.",
-            });
-        }
+    otpSession.attempts += 1;
+
+    if (otpSession.attempts >= 5) {
+        customerOtps.delete(customerPhone);
+
+        return res.status(401).json({
+            success: false,
+            message: "Too many incorrect attempts. Please request a new OTP.",
+        });
+    }
+
+    return res.status(401).json({
+        success: false,
+        message: "Invalid OTP.",
+    });
+}
 
         // 10. Find an existing Customer or create a new account.
         let customer = await Customer.findOne({

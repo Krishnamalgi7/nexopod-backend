@@ -50,9 +50,10 @@ const sendShopOwnerOtp = async (req, res) => {
         }
 
         shopOwnerOtps.set(phone.trim(), {
-            otp: developmentOtp,
-            expiresAt: Date.now() + OTP_VALIDITY_MS,
-        });
+    otp: developmentOtp,
+    expiresAt: Date.now() + OTP_VALIDITY_MS,
+    attempts: 0,
+});
 
         console.log("[ShopOwner] Development OTP session created.");
 
@@ -61,9 +62,7 @@ const sendShopOwnerOtp = async (req, res) => {
             message: "OTP generated successfully. It is valid for 2 minutes.",
             data: {
                 expiresIn: 120,
-                ...(process.env.NODE_ENV === "development"
-                    ? { developmentOtp }
-                    : {}),
+                
             },
         });
     } catch (error) {
@@ -123,11 +122,22 @@ const loginShopOwner = async (req, res) => {
 
         // 10. Verify the submitted OTP.
         if (otp !== otpSession.otp) {
-            return res.status(401).json({
-                success: false,
-                message: "Invalid OTP.",
-            });
-        }
+    otpSession.attempts += 1;
+
+    if (otpSession.attempts >= 5) {
+        shopOwnerOtps.delete(phone.trim());
+
+        return res.status(401).json({
+            success: false,
+            message: "Too many incorrect attempts. Please request a new OTP.",
+        });
+    }
+
+    return res.status(401).json({
+        success: false,
+        message: "Invalid OTP.",
+    });
+}
 
         // 11. Confirm the phone still belongs to an active store.
         const store = await Store.findOne({

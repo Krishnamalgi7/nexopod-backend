@@ -50,4 +50,28 @@ app.get("/", (req, res) => {
     });
 });
 
+// Handle requests to unknown routes.
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        message: "API route not found.",
+    });
+});
+
+// Handle unexpected application errors.
+app.use((err, req, res, next) => {
+    console.error("[Server] Request error:", err.message);
+
+    if (res.headersSent) {
+        return next(err);
+    }
+
+    return res.status(err.status || 500).json({
+        success: false,
+        message: err.status === 400
+            ? "Invalid request."
+            : "Internal server error.",
+    });
+});
+
 module.exports = app;

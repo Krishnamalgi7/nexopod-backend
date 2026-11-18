@@ -6,6 +6,7 @@ const { getStoreImageFilePath } = require("../utils/storeImageUtils");
 const Store = require("../models/Store");
 const { compressAndSaveImage } = require("../utils/imageUtils");
 const uploadRoot = path.resolve("uploads/stores");
+const { disconnectStoreSockets } = require("../config/socket");
 
 const { createSlug, isValidGoogleMapsLink } = require("../utils/storeUtils");
 
@@ -22,9 +23,21 @@ const DAYS = [
 
 const ALLOWED_SERVICES = ["Phone Charging", "Pick Me Later"];
 
-
 const validateStoreDetails = (data) => {
-  const { name, addressLink, contactNumber, services, weeklyTimings } = data;
+  const { name, addressLink, contactNumber, timings, services, weeklyTimings } =
+    data;
+
+  if (timings !== undefined && typeof timings !== "string") {
+    return "Store timings must be valid text.";
+  }
+
+  if (
+    typeof timings === "string" &&
+    timings.trim().length > 0 &&
+    (timings.trim().length < 2 || timings.trim().length > 100)
+  ) {
+    return "Store timings must contain between 2 and 100 characters.";
+  }
 
   let parsedServices = services;
   let parsedWeeklyTimings = weeklyTimings;
@@ -84,8 +97,7 @@ const validateStoreDetails = (data) => {
     const [clock, period] = time.split(" ");
     const [hours, minutes] = clock.split(":").map(Number);
 
-    const normalizedHours =
-      (hours % 12) + (period === "PM" ? 12 : 0);
+    const normalizedHours = (hours % 12) + (period === "PM" ? 12 : 0);
 
     return normalizedHours * 60 + minutes;
   };
@@ -118,7 +130,6 @@ const validateStoreDetails = (data) => {
   return null;
 };
 
-
 const isContactNumberAlreadyAssigned = async (
   contactNumber,
   excludedStoreId = null,
@@ -141,6 +152,13 @@ const createStore = async (req, res) => {
   let folderCreated = false;
 
   try {
+    if (!req.superAdmin?.isStoreCreator) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to create stores.",
+      });
+    }
+
     const validationError = validateStoreDetails(req.body);
 
     if (validationError) {
@@ -252,7 +270,7 @@ const createStore = async (req, res) => {
         });
     }
 
-        if (error.code === 11000) {
+    if (error.code === 11000) {
       return res.status(409).json({
         success: false,
         message: "This contact number is already assigned to another store.",
@@ -498,6 +516,10 @@ const updateStoreStatus = async (req, res) => {
       });
     }
 
+    if (!isActive) {
+      disconnectStoreSockets(updatedStore._id.toString());
+    }
+
     return res.status(200).json({
       success: true,
       message: `Store marked as ${isActive ? "Active" : "Inactive"}.`,
@@ -563,6 +585,8 @@ const updateStoreDetails = async (req, res) => {
         message: "Store not found.",
       });
     }
+
+    const previousContactNumber = existingStore.contactNumber;
 
     const phoneAlreadyAssigned = await isContactNumberAlreadyAssigned(
       contactNumber,
@@ -733,6 +757,10 @@ const updateStoreDetails = async (req, res) => {
 
     saveCompleted = true;
 
+    if (previousContactNumber !== updatedStore.contactNumber) {
+      disconnectStoreSockets(updatedStore._id.toString());
+    }
+
     // 21. Delete removed additional images after successful database update.
     for (const image of removedImages) {
       const imagePath = getStoreImageFilePath(image, uploadRoot);
@@ -779,7 +807,7 @@ const updateStoreDetails = async (req, res) => {
       }
     }
 
-        if (error.code === 11000) {
+    if (error.code === 11000) {
       return res.status(409).json({
         success: false,
         message: "This contact number is already assigned to another store.",

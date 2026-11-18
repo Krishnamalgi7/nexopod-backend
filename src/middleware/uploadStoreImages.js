@@ -52,15 +52,6 @@ const validateStoreImageFiles = (req, res, next) => {
     for (const file of files) {
         const detectedType = detectImageType(file.buffer);
 
-        console.log("STORE IMAGE DEBUG:", {
-    field: file.fieldname,
-    originalName: file.originalname,
-    mimetype: file.mimetype,
-    detectedType,
-    bufferLength: file.buffer?.length,
-    signature: file.buffer?.subarray(0, 16).toString("hex"),
-});
-
         if (!detectedType) {
             console.error("Store image verification failed:", {
                 field: file.fieldname,

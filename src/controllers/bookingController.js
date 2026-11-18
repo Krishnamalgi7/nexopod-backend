@@ -1,6 +1,26 @@
 const mongoose = require("mongoose");
 const Booking = require("../models/Booking");
 const Store = require("../models/Store");
+const { getIO } = require("../config/socket");
+const Customer = require("../models/Customer");
+
+const notifyStoreBooking = (event, booking, customerName) => {
+  try {
+    getIO()
+      .to(`store:${booking.storeId}`)
+      .emit(event, {
+        booking: {
+          id: booking._id,
+          service: booking.service,
+          startAt: booking.startAt,
+          status: booking.status,
+          customerName: customerName || "Customer",
+        },
+      });
+  } catch (error) {
+    console.error("[Socket] Booking notification failed:", error.message);
+  }
+};
 
 const TIME_ZONE = "Asia/Kolkata";
 
@@ -43,6 +63,19 @@ const getMinutes = (time) => {
   return hours * 60 + minutes;
 };
 
+// Validate the calendar date in a booking date-time string.
+const isValidCalendarDate = (dateString) => {
+  const [year, month, day] = dateString.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    year >= 1000 &&
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+};
+
 // Create a Phone Charging booking.
 const createPhoneChargingBooking = async (req, res) => {
   try {
@@ -76,6 +109,13 @@ const createPhoneChargingBooking = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Invalid booking date and time.",
+      });
+    }
+
+    if (!isValidCalendarDate(startAt.slice(0, 10))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid storage calendar date.",
       });
     }
 
@@ -154,6 +194,8 @@ const createPhoneChargingBooking = async (req, res) => {
       startAt: selectedStartAt,
     });
 
+    notifyStoreBooking("new_booking", booking, req.customer.name);
+
     return res.status(201).json({
       success: true,
       message: "Phone Charging booking created successfully.",
@@ -211,6 +253,13 @@ const createPickMeLaterBooking = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Invalid storage date and time.",
+      });
+    }
+
+    if (!isValidCalendarDate(startAt.slice(0, 10))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid booking calendar date.",
       });
     }
 
@@ -288,6 +337,8 @@ const createPickMeLaterBooking = async (req, res) => {
       service: "Pick Me Later",
       startAt: selectedStartAt,
     });
+
+    notifyStoreBooking("new_booking", booking, req.customer.name);
 
     return res.status(201).json({
       success: true,
@@ -395,14 +446,52 @@ const updatePhoneChargingBookingStatus = async (req, res) => {
       }
     }
 
-    booking.status = status;
-    await booking.save();
+    const updatedBooking = await Booking.findOneAndUpdate(
+      {
+        _id: booking._id,
+        storeId: req.store._id,
+        status: booking.status,
+      },
+      {
+        $set: { status },
+      },
+      {
+        new: true,
+        runValidators: true,
+      },
+    );
+
+    if (!updatedBooking) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Booking status has already changed. Please refresh and try again.",
+      });
+    }
+
+    if (status === "completed") {
+      let customerName = "Customer";
+
+      try {
+        const customer = await Customer.findById(booking.customerId)
+          .select("name")
+          .lean();
+
+        customerName = customer?.name || "Customer";
+      } catch (error) {
+        console.error("[Socket] Customer name lookup failed:", error.message);
+      }
+
+      notifyStoreBooking("booking_completed", updatedBooking, customerName);
+    }
 
     return res.status(200).json({
       success: true,
       message: "Booking status updated successfully.",
       data: {
-        booking,
+        data: {
+          booking: updatedBooking,
+        },
       },
     });
   } catch (error) {
