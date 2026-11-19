@@ -1,7 +1,10 @@
+
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
+
 const Store = require("../models/Store");
+const SuperAdmin = require("../models/SuperAdmin");
 
 let io;
 
@@ -13,63 +16,98 @@ const initializeSocket = (httpServer) => {
     },
   });
 
+  // Authenticate Shop Owners and Super Admins.
   io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth?.token;
 
       if (typeof token !== "string" || !token) {
-        return next(new Error("Shop Owner authentication required."));
+        return next(new Error("Authentication required."));
       }
 
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+      // Shop Owner authentication.
+      if (decoded.role === "shopOwner") {
+        if (!mongoose.Types.ObjectId.isValid(decoded.storeId)) {
+          return next(new Error("Invalid Shop Owner token."));
+        }
+
+        const store = await Store.findOne({
+          _id: decoded.storeId,
+          isActive: true,
+        }).select("_id name contactNumber isActive");
+
+        if (!store) {
+          return next(new Error("Shop Owner access is no longer authorized."));
+        }
+
+        socket.data.role = "shopOwner";
+        socket.data.storeId = store._id.toString();
+        socket.data.phone = store.contactNumber;
+
+        return next();
+      }
+
+      // Super Admin authentication.
       if (
-        decoded.role !== "shopOwner" ||
-        !mongoose.Types.ObjectId.isValid(decoded.storeId) ||
-        typeof decoded.phone !== "string"
+        typeof decoded.userId !== "string" ||
+        !mongoose.isValidObjectId(decoded.userId)
       ) {
-        return next(new Error("Invalid Shop Owner token."));
+        return next(new Error("Invalid authentication token."));
       }
 
-      const store = await Store.findOne({
-        _id: decoded.storeId,
-        contactNumber: decoded.phone,
-        isActive: true,
-      }).select("_id name contactNumber isActive");
+      const superAdmin = await SuperAdmin.findById(decoded.userId).select("_id");
 
-      if (!store) {
-        return next(new Error("Shop Owner access is no longer authorized."));
+      if (!superAdmin) {
+        return next(new Error("Super Admin account not found."));
       }
 
-      socket.data.storeId = store._id.toString();
-      socket.data.phone = store.contactNumber;
+      socket.data.role = "superAdmin";
+      socket.data.superAdminId = superAdmin._id.toString();
 
-      next();
+      return next();
     } catch (error) {
-      next(new Error("Invalid or expired Shop Owner session."));
+      return next(new Error("Invalid or expired session."));
     }
   });
 
   io.on("connection", async (socket) => {
-    const room = `store:${socket.data.storeId}`;
-
     try {
-      socket.join(room);
+      // Super Admin joins the admin notification room.
+      if (socket.data.role === "superAdmin") {
+        socket.join("super-admin");
 
-      const store = await Store.findOne({
-        _id: socket.data.storeId,
-        contactNumber: socket.data.phone,
-        isActive: true,
-      }).select("_id");
+        console.log("[Socket] Super Admin connected.");
 
-      if (!store) {
-        socket.disconnect(true);
         return;
       }
 
-      console.log("[Socket] Shop Owner connected to store room.");
+      // Shop Owner joins their own store room.
+      if (socket.data.role === "shopOwner") {
+        const room = `store:${socket.data.storeId}`;
+
+        socket.join(room);
+
+        const store = await Store.findOne({
+          _id: socket.data.storeId,
+          contactNumber: socket.data.phone,
+          isActive: true,
+        }).select("_id");
+
+        if (!store) {
+          socket.disconnect(true);
+          return;
+        }
+
+        console.log("[Socket] Shop Owner connected to store room.");
+      }
     } catch (error) {
-      console.error("[Socket] Connection authorization failed:", error.message);
+      console.error(
+        "[Socket] Connection authorization failed:",
+        error.message,
+      );
+
       socket.disconnect(true);
     }
   });

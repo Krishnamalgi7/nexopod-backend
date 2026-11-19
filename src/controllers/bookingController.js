@@ -3,6 +3,7 @@ const Booking = require("../models/Booking");
 const Store = require("../models/Store");
 const { getIO } = require("../config/socket");
 const Customer = require("../models/Customer");
+const Notification = require("../models/Notification");
 
 const notifyStoreBooking = (event, booking, customerName) => {
   try {
@@ -20,6 +21,31 @@ const notifyStoreBooking = (event, booking, customerName) => {
   } catch (error) {
     console.error("[Socket] Booking notification failed:", error.message);
   }
+};
+
+const createStoreNotification = async (event, booking, customerName) => {
+  const name = customerName || "Customer";
+
+  try {
+    const isNewBooking = event === "new_booking";
+
+    await Notification.create({
+      storeId: booking.storeId,
+      bookingId: booking._id,
+      type: event,
+      title: isNewBooking ? "New Booking" : "Booking Completed",
+      message: isNewBooking
+        ? `${name} booked ${booking.service}.`
+        : `${name}'s ${booking.service} booking has been completed.`,
+    });
+  } catch (error) {
+    console.error(
+      "[Notifications] Failed to save notification:",
+      error.message,
+    );
+  }
+
+  notifyStoreBooking(event, booking, name);
 };
 
 const TIME_ZONE = "Asia/Kolkata";
@@ -194,7 +220,7 @@ const createPhoneChargingBooking = async (req, res) => {
       startAt: selectedStartAt,
     });
 
-    notifyStoreBooking("new_booking", booking, req.customer.name);
+    await createStoreNotification("new_booking", booking, req.customer.name);
 
     return res.status(201).json({
       success: true,
@@ -338,7 +364,7 @@ const createPickMeLaterBooking = async (req, res) => {
       startAt: selectedStartAt,
     });
 
-    notifyStoreBooking("new_booking", booking, req.customer.name);
+    await createStoreNotification("new_booking", booking, req.customer.name);
 
     return res.status(201).json({
       success: true,
@@ -363,25 +389,193 @@ const createPickMeLaterBooking = async (req, res) => {
   }
 };
 
-// Get bookings belonging to the authenticated Shop Owner's store.
+
+// Get cursor-paginated bookings grouped by service for the authenticated Shop Owner's store.
 const getShopOwnerBookings = async (req, res) => {
   try {
-    const bookings = await Booking.find({
+    const limit = Number(req.query.limit || 20);
+    const service = req.query.service || "all";
+    const cursor = req.query.cursor;
+
+    // Validate pagination parameters.
+    if (
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 50
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid pagination parameters.",
+      });
+    }
+
+    // Validate service filter.
+    if (!["all", "Phone Charging", "Pick Me Later"].includes(service)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid booking service filter.",
+      });
+    }
+
+    const query = {
       storeId: req.store._id,
-    })
-      .populate("customerId", "name")
-      .sort({ createdAt: -1 })
-      .lean();
+    };
+
+    if (service !== "all") {
+      query.service = service;
+    }
+
+    // Validate and apply the pagination cursor.
+    if (cursor !== undefined) {
+      if (typeof cursor !== "string") {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid booking cursor.",
+        });
+      }
+
+      const cursorParts = cursor.split("|");
+
+      if (
+        cursorParts.length !== 2 ||
+        Number.isNaN(new Date(cursorParts[0]).getTime()) ||
+        !mongoose.Types.ObjectId.isValid(cursorParts[1])
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid booking cursor.",
+        });
+      }
+
+      const cursorDate = new Date(cursorParts[0]);
+      const cursorId = new mongoose.Types.ObjectId(cursorParts[1]);
+
+      query.$or = [
+        { createdAt: { $lt: cursorDate } },
+        {
+          createdAt: cursorDate,
+          _id: { $lt: cursorId },
+        },
+      ];
+    }
+
+    // Fetch one extra booking to determine whether another page exists.
+    const [fetchedBookings, serviceCounts] = await Promise.all([
+      Booking.find(query)
+        .populate("customerId", "name")
+        .sort({ createdAt: -1, _id: -1 })
+        .limit(limit + 1)
+        .lean(),
+
+      Booking.aggregate([
+        {
+          $match: {
+            storeId: req.store._id,
+            ...(service !== "all" ? { service } : {}),
+          },
+        },
+        {
+          $group: {
+            _id: "$service",
+            total: { $sum: 1 },
+          },
+        },
+      ]),
+    ]);
+
+    const hasNextPage = fetchedBookings.length > limit;
+    const bookings = fetchedBookings.slice(0, limit);
+
+    // Calculate the next action on the backend.
+    const bookingsWithActions = bookings.map((booking) => {
+      let nextAction = null;
+
+      if (
+        booking.service === "Phone Charging" &&
+        booking.status === "confirmed"
+      ) {
+        nextAction = {
+          label: "Start Service",
+          status: "in_progress",
+        };
+      } else if (
+        booking.service === "Phone Charging" &&
+        booking.status === "in_progress"
+      ) {
+        nextAction = {
+          label: "Complete Service",
+          status: "completed",
+        };
+      } else if (
+        booking.service === "Pick Me Later" &&
+        booking.status === "confirmed"
+      ) {
+        nextAction = {
+          label: "Mark Collected",
+          status: "completed",
+        };
+      }
+
+      return {
+        ...booking,
+        customerName: booking.customerId?.name || "Customer",
+        nextAction,
+      };
+    });
+
+    const phoneChargingBookings = bookingsWithActions.filter(
+      (booking) => booking.service === "Phone Charging"
+    );
+
+    const pickMeLaterBookings = bookingsWithActions.filter(
+      (booking) => booking.service === "Pick Me Later"
+    );
+
+    const phoneChargingCount =
+      serviceCounts.find((item) => item._id === "Phone Charging")?.total || 0;
+
+    const pickMeLaterCount =
+      serviceCounts.find((item) => item._id === "Pick Me Later")?.total || 0;
+
+    const totalBookings = serviceCounts.reduce(
+      (total, item) => total + item.total,
+      0
+    );
+
+    // Build the cursor from the last booking returned.
+    const lastBooking = bookings[bookings.length - 1];
+
+    const nextCursor =
+      hasNextPage && lastBooking
+        ? `${lastBooking.createdAt.toISOString()}|${lastBooking._id}`
+        : null;
 
     return res.status(200).json({
       success: true,
       message: "Store bookings fetched successfully.",
       data: {
-        bookings,
+        phoneCharging: {
+          bookings: phoneChargingBookings,
+          totalBookings: phoneChargingCount,
+        },
+        pickMeLater: {
+          bookings: pickMeLaterBookings,
+          totalBookings: pickMeLaterCount,
+        },
+        pagination: {
+          totalBookings,
+          limit,
+          hasNextPage,
+          nextCursor,
+          service,
+        },
       },
     });
   } catch (error) {
-    console.error("[Booking] Failed to fetch store bookings:", error.message);
+    console.error(
+      "[Booking] Failed to fetch store bookings:",
+      error.message
+    );
 
     return res.status(500).json({
       success: false,
@@ -389,6 +583,8 @@ const getShopOwnerBookings = async (req, res) => {
     });
   }
 };
+
+
 
 // Update a booking's status from the Shop Owner app.
 const updatePhoneChargingBookingStatus = async (req, res) => {
@@ -482,7 +678,11 @@ const updatePhoneChargingBookingStatus = async (req, res) => {
         console.error("[Socket] Customer name lookup failed:", error.message);
       }
 
-      notifyStoreBooking("booking_completed", updatedBooking, customerName);
+      await createStoreNotification(
+        "booking_completed",
+        updatedBooking,
+        customerName,
+      );
     }
 
     return res.status(200).json({
