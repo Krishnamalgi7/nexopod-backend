@@ -172,36 +172,117 @@ const notifyShopOwner = async ({
   }
 };
 
-// Get all pending requests.
+// Get store-profile requests with status filters, search and pagination.
 const getPendingStoreProfileRequests = async (req, res) => {
   try {
-    const requests = await StoreProfileChangeRequest.find({
-      status: "pending",
-    })
-      .populate("storeId", "name contactNumber image isActive")
-      .sort({ createdAt: -1 })
-      .lean();
+    const {
+      status = "all",
+      search = "",
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    const allowedStatuses = ["all", "pending", "approved", "rejected"];
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid request status.",
+      });
+    }
+
+    const currentPage = Math.max(1, Number.parseInt(page, 10) || 1);
+    const pageSize = Math.min(
+      50,
+      Math.max(1, Number.parseInt(limit, 10) || 10)
+    );
+
+    const filter = {};
+
+    if (status !== "all") {
+      filter.status = status;
+    }
+
+    const searchTerm = search.trim();
+
+    if (searchTerm) {
+      const escapedSearch = searchTerm.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+      );
+
+      const matchingStores = await Store.find({
+        name: { $regex: escapedSearch, $options: "i" },
+      }).distinct("_id");
+
+      const searchConditions = [
+        { storeId: { $in: matchingStores } },
+      ];
+
+      if (mongoose.isValidObjectId(searchTerm)) {
+        searchConditions.push(
+          { _id: new mongoose.Types.ObjectId(searchTerm) },
+          { storeId: new mongoose.Types.ObjectId(searchTerm) }
+        );
+      }
+
+      filter.$or = searchConditions;
+    }
+
+    const [requests, total, statusCounts] = await Promise.all([
+      StoreProfileChangeRequest.find(filter)
+        .populate(
+          "storeId",
+          "name contactNumber image isActive"
+        )
+        .sort({ createdAt: -1 })
+        .skip((currentPage - 1) * pageSize)
+        .limit(pageSize)
+        .lean(),
+
+      StoreProfileChangeRequest.countDocuments(filter),
+
+      Promise.all(
+        allowedStatuses
+          .filter((item) => item !== "all")
+          .map(async (item) => ({
+            [item]: await StoreProfileChangeRequest.countDocuments({
+              status: item,
+            }),
+          }))
+      ),
+    ]);
+
+    const counts = Object.assign({}, ...statusCounts);
 
     return res.status(200).json({
       success: true,
-      message: "Pending store-profile requests fetched successfully.",
+      message: "Store-profile requests fetched successfully.",
       data: {
         requests,
-        total: requests.length,
+        total,
+        page: currentPage,
+        limit: pageSize,
+        totalPages: Math.ceil(total / pageSize),
+        statusCounts: {
+          all: counts.pending + counts.approved + counts.rejected,
+          ...counts,
+        },
       },
     });
   } catch (error) {
     console.error(
-      "[Store Profile Review] Fetch pending requests failed:",
-      error.message,
+      "[Store Profile Review] Fetch requests failed:",
+      error.message
     );
 
     return res.status(500).json({
       success: false,
-      message: "Unable to fetch pending store-profile requests.",
+      message: "Unable to fetch store-profile requests.",
     });
   }
 };
+
 
 // Get one request with its proposed details.
 const getStoreProfileRequestById = async (req, res) => {
@@ -216,11 +297,11 @@ const getStoreProfileRequestById = async (req, res) => {
     }
 
     const request = await StoreProfileChangeRequest.findById(requestId)
-      .populate(
-        "storeId",
-        "name contactNumber addressLink image images isActive",
-      )
-      .lean();
+  .populate(
+    "storeId",
+    "name contactNumber addressLink timings services weeklyTimings image images isActive",
+  )
+  .lean();
 
     if (!request) {
       return res.status(404).json({
